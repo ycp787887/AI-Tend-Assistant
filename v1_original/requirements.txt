@@ -1,0 +1,8 @@
+streamlit
+pypdf
+DeepSeek
+openai
+reportlab
+xhtml2pdf
+python-dotenv
+
