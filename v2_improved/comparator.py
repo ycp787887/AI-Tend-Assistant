@@ -4,6 +4,7 @@
 
 import re
 from typing import Any
+from logger_config import logger
 
 # ========== 单位换算 ==========
 def parse_capital_to_wan(text: str | None) -> float | None:
@@ -41,11 +42,15 @@ def compare_with_company_profile(core: dict[str, Any], company_profile: dict[str
     比较标书要求和公司资质
     返回比较结果字典
     """
+    logger.info("开始对比标书要求与公司资质")  # ← 移到函数体内
+    
     # 1. 比较注册资本
     required_capital_text = core.get("注册资本要求")
     required_capital_wan = parse_capital_to_wan(required_capital_text)
     company_capital_text = company_profile.get("公司注册资本")
     company_capital_wan = parse_capital_to_wan(company_capital_text)
+    
+    logger.info(f"注册资本对比：要求={required_capital_text}，实际={company_capital_text}")  # ← 加
 
     # 2. 比较资质证书
     required_certs = core.get("必须具备的资质证书", [])
@@ -58,6 +63,8 @@ def compare_with_company_profile(core: dict[str, Any], company_profile: dict[str
         company_certs = [str(c).strip() for c in company_certs_raw if str(c).strip()]
     else:
         company_certs = normalize_certs(str(company_certs_raw))
+    
+    logger.info(f"证书对比：要求{len(required_certs)}项，公司持有{len(company_certs)}项")  # ← 加
     
     # 找出缺失的证书
     missing_certs: list[str] = []
@@ -72,7 +79,18 @@ def compare_with_company_profile(core: dict[str, Any], company_profile: dict[str
         and required_capital_wan > company_capital_wan
     )
 
-    return {
+    # 记录关键发现
+    if capital_not_met:
+        logger.warning(f"注册资本不达标：要求{required_capital_wan}万，实际{company_capital_wan}万")  # ← 加
+    else:
+        logger.info("注册资本达标")  # ← 加
+    
+    if missing_certs:
+        logger.warning(f"资质证书缺失：{', '.join(missing_certs)}")  # ← 加
+    else:
+        logger.info("资质证书齐全")  # ← 加
+
+    result = {
         "capital_not_met": capital_not_met,
         "required_capital_text": required_capital_text,
         "required_capital_wan": required_capital_wan,
@@ -81,3 +99,6 @@ def compare_with_company_profile(core: dict[str, Any], company_profile: dict[str
         "company_certs": company_certs,
         "missing_certs": missing_certs,
     }
+    
+    logger.info("对比完成")  # ← 加
+    return result

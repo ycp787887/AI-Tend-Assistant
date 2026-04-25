@@ -5,6 +5,8 @@
 import os
 import traceback
 import streamlit as st
+from logger_config import logger
+
 
 # ========== 磁盘缓存工具 ==========
 import hashlib
@@ -132,6 +134,7 @@ run_compare = st.button(
 )
 
 if run_compare:
+    logger.info("用户点击「开始比对」")
     try:
         # 1. 解析PDF
         with st.spinner("📖 正在解析招标文件..."):
@@ -139,45 +142,71 @@ if run_compare:
         if not tender_text.strip():
             st.error("❌ 招标文件未提取到文本，请检查是否为扫描件。")
             st.stop()
+        logger.info(f"招标文件解析成功，文本长度: {len(tender_text)} 字符")  # ← 加
 
         with st.spinner("📖 正在解析公司资质文件..."):
             company_text = extract_pdf_text(st.session_state["company_file_bytes"])
         if not company_text.strip():
             st.error("❌ 公司资质文件未提取到文本，请检查是否为扫描件。")
             st.stop()
+        logger.info(f"公司资质文件解析成功，文本长度: {len(company_text)} 字符")  # ← 加
+    
 
         st.session_state["last_full_text"] = tender_text
         st.session_state["company_full_text"] = company_text
 
         # 2. AI提取（或降级兜底）
         if user_key and user_key.strip():
+            logger.info("检测到 API Key，使用 AI 提取")  # ← 加
             # ===== AI提取标书要求 =====
             core = get_cache(st.session_state["tender_file_bytes"], "tender_core")
             if core is None:
+                logger.info("标书要求缓存未命中，使用 AI 提取")  # ← 加
                 with st.spinner("🤖 AI 正在分析标书要求..."):
                     core = extract_core_fields_with_ai(tender_text, user_key.strip())
                 set_cache(st.session_state["tender_file_bytes"], "tender_core", core)
+                logger.info("标书要求提取成功，已写入缓存")  # ← 加
             else:
+                logger.info("标书要求从磁盘缓存加载")  # ← 加
                 st.success("⚡ 标书要求已从缓存加载")
 
             # ===== AI提取公司资质 =====
             company_profile = get_cache(st.session_state["company_file_bytes"], "company_profile")
             if company_profile is None:
+                logger.info("公司资质缓存未命中，开始调用 AI")  # ← 加
                 with st.spinner("🤖 AI 正在分析公司资质..."):
                     company_profile = extract_company_profile_with_ai(company_text, user_key.strip())
                 set_cache(st.session_state["company_file_bytes"], "company_profile", company_profile)
+                logger.info("公司资质提取成功，已写入缓存")  # ← 加
             else:
+                logger.info("公司资质从磁盘缓存加载")  # ← 加
                 st.success("⚡ 公司资质已从缓存加载")
         else:
             # ===== 降级方案：用正则提取 =====
+            logger.warning("API Key 为空，启用降级方案（正则提取）")  # ← 加
             st.warning("⚠️ 未配置 API Key，当前使用本地规则兜底提取。")
             core = fallback_extract_core_fields(tender_text)
             company_profile = fallback_extract_company_profile(company_text)
+            logger.info("降级提取完成")  # ← 加
 
+            # ⭐ 加这个
+            if not core.get("项目名称") and not core.get("注册资本要求"):
+                st.info("💡 正则未能提取到关键信息，建议配置 API Key 以获得准确结果。")
+
+                
         # 3. 比较
+        logger.info("开始对比标书要求与公司资质")  # ← 加
         compare_result = compare_with_company_profile(core, company_profile)
+        
+        # 记录比较结果的关键信息
+        if compare_result.get("capital_not_met"):
+            logger.warning(f"注册资本不达标：要求{compare_result.get('required_capital_text')}，实际{compare_result.get('company_capital_text')}")  # ← 加
+        if compare_result.get("missing_certs"):
+            logger.warning(f"资质证书缺失：{compare_result['missing_certs']}")  # ← 加
+        
         risk_rows = build_risk_rows(core, compare_result)
         advice_text = build_advice(compare_result)
+        logger.info(f"比对完成，建议：{advice_text[:50]}...")  # ← 加
 
         # 4. 保存结果
         st.session_state["last_core"] = core
@@ -187,15 +216,18 @@ if run_compare:
         st.session_state["last_advice"] = advice_text
         st.session_state["analysis_ready"] = True
 
+        logger.info("分析完成，结果已保存到 session_state")  # ← 加
         st.success("🎉 分析完成！")
             
     except Exception as exc:
+        logger.error(f"分析失败: {type(exc).__name__} - {exc}")  # ← 加
         st.error(f"❌ 分析失败：{type(exc).__name__}: {exc}")
         with st.expander("详细报错信息"):
             st.code(traceback.format_exc())
 
 # ========== 展示结果 ==========
 if st.session_state.get("analysis_ready"):
+    logger.info("开始展示分析结果")  # ← 加
     st.divider()
     
     if st.session_state.get("last_core"):
@@ -215,30 +247,39 @@ if st.session_state.get("analysis_ready"):
 
 # ========== 隐藏风险审计 ==========
 if hidden_risk_clicked:
+    logger.info("用户点击「隐藏风险审计」")  # ← 加
     if not st.session_state.get("last_full_text"):
+        logger.warning("隐藏风险审计失败：未完成双文件比对")  # ← 加
         st.warning("请先完成双文件比对")
     elif not user_key.strip():
+        logger.warning("隐藏风险审计失败：API Key 为空")  # ← 加
         st.warning("请先填写 API Key")
     else:
         cache_data = get_cache(st.session_state["tender_file_bytes"], "hidden_risks")
         if cache_data is None:
+            logger.info("隐藏风险缓存未命中，开始调用 AI")  # ← 加
             try:
                 with st.spinner("🔍 AI 正在扫描隐藏风险..."):
                     risks = scan_hidden_risks_with_ai(st.session_state["last_full_text"], user_key.strip())
                 set_cache(st.session_state["tender_file_bytes"], "hidden_risks", {"risks": risks})
                 st.session_state["hidden_risks"] = risks
+                logger.info(f"隐藏风险扫描成功，发现 {len(risks)} 个风险项")  # ← 加
             except Exception as exc:
+                logger.error(f"隐藏风险扫描失败: {exc}")  # ← 加
                 st.error(f"扫描失败：{exc}")
                 st.session_state["hidden_risks"] = []
         else:
+            logger.info("隐藏风险从磁盘缓存加载")  # ← 加
             st.success("✅ 隐藏风险已从缓存加载")
             st.session_state["hidden_risks"] = cache_data.get("risks", [])
         st.rerun()
 
 if st.session_state.get("hidden_risks") is not None:
-    st.markdown("### ⚠️ 隐藏风险扫描结果")
-    if st.session_state["hidden_risks"]:
+     risk_count = len(st.session_state["hidden_risks"])  # ← 加这行
+     logger.info(f"展示隐藏风险结果：{risk_count} 个风险项")  # ← 加
+     st.markdown("### ⚠️ 隐藏风险扫描结果")
+     if st.session_state["hidden_risks"]:
         for i, risk in enumerate(st.session_state["hidden_risks"], 1):
             st.warning(f"{i}. {risk}")
-    else:
+     else:
         st.success("未发现明显风险")
