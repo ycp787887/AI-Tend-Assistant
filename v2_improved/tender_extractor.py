@@ -4,7 +4,7 @@
 
 import json
 import re
-from typing import Any
+from typing import Any, Generator
 from openai import OpenAI
 from config import DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, LLM_TIMEOUT_SECONDS
 from retry_handler import with_retry
@@ -14,7 +14,7 @@ from logger_config import logger
 # ========== 工具函数 ==========
 def get_qualification_snippet(full_text: str, max_chars: int = 5000) -> str:
     """从大段文字里截取'资格要求'附近的内容"""
-    logger.info("开始截取资格要求片段")  # ← 加
+    logger.info("开始截取资格要求片段")
     keywords = ["投标人资格要求", "资格要求", "投标人资格", "资质要求"]
     cleaned = re.sub(r"\n{2,}", "\n", full_text)
     lower_text = cleaned.lower()
@@ -24,11 +24,12 @@ def get_qualification_snippet(full_text: str, max_chars: int = 5000) -> str:
         if idx != -1:
             start = max(0, idx - 300)
             end = min(len(cleaned), idx + max_chars)
-            logger.info(f"找到关键词「{kw}」，截取位置 {start}-{end}")  # ← 加
+            logger.info(f"找到关键词「{kw}」，截取位置 {start}-{end}")
             return cleaned[start:end]
 
-    logger.info("未找到资格要求关键词，返回原文前段")  # ← 加
+    logger.info("未找到资格要求关键词，返回原文前段")
     return cleaned[:max_chars]
+
 
 # ========== 兜底提取（AI失败时用） ==========
 def fallback_extract_core_fields(raw_text: str) -> dict[str, Any]:
@@ -39,7 +40,6 @@ def fallback_extract_core_fields(raw_text: str) -> dict[str, Any]:
         m = re.search(pattern, raw_text, flags=re.I)
         return m.group(1).strip() if m else None
 
-    # ⭐ 扩充繁简体关键词
     project_name = pick(
         r"(?:项目名称|項目名稱|项目名|項目名|採購案名|標案名稱|案名|采购项目名称)\s*[:：]\s*([^\n\r]+)"
     )
@@ -75,15 +75,15 @@ def fallback_extract_core_fields(raw_text: str) -> dict[str, Any]:
     
     return result
 
-    
-# ========== AI提取（主力） ==========
+
+# ========== AI提取流式版（主力） ==========
 @with_retry
-def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
+def extract_core_fields_streaming(raw_text: str, api_key: str) -> Generator:
     """
-    用AI从招标文件提取核心字段
-    返回字段：项目名称、注册资本要求、资质证书列表、投标截止时间
+    流式AI提取标书要求——逐字返回
+    用于打字机效果展示
     """
-    logger.info(f"开始AI提取标书要求，文本长度: {len(raw_text)} 字符")  # ← 加
+    logger.info(f"开始流式AI提取标书要求，文本长度: {len(raw_text)} 字符")
     
     client = OpenAI(
         api_key=api_key,
@@ -92,7 +92,6 @@ def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
         max_retries=0
     )
     
-    # ===== 想改AI提取的内容？改下面这个提示词 =====
     prompt = f"""
 你是招投标信息抽取助手。请从下面原始文本中精准提取以下字段，并仅输出一个 JSON 对象：
 - 项目名称: string | null
@@ -108,12 +107,12 @@ def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
 原始文本：
 {raw_text[:12000]}
 """
-    # ===== 提示词结束 =====
     
-    logger.info("发送请求到 DeepSeek API")  # ← 加
+    logger.info("发送流式请求到 DeepSeek API")
     response = client.chat.completions.create(
         model=DEEPSEEK_MODEL,
         temperature=0,
+        stream=True,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": "你是严谨的信息抽取引擎，只返回合法 JSON。"},
@@ -121,10 +120,27 @@ def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
         ],
     )
     
-    content = response.choices[0].message.content or "{}"
-    logger.info(f"API 返回内容长度: {len(content)} 字符")  # ← 加
+    full_text = ""
+    for chunk in response:
+        if chunk.choices[0].delta.content:
+            token = chunk.choices[0].delta.content
+            full_text += token
+            yield token, full_text
     
-    data = json.loads(content)
+    logger.info(f"流式提取完成，总长度: {len(full_text)} 字符")
+
+
+def parse_streaming_result(full_text: str) -> dict[str, Any]:
+    """解析流式输出的最终结果"""
+    import json
+    try:
+        data = json.loads(full_text)
+    except json.JSONDecodeError:
+        arr_match = re.search(r"\[.*\]", full_text, flags=re.S)
+        if arr_match:
+            data = json.loads(arr_match.group(0))
+        else:
+            data = {}
     
     result = {
         "项目名称": data.get("项目名称"),
@@ -133,9 +149,18 @@ def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
         "投标截止时间": data.get("投标截止时间"),
     }
     
-    # 记录提取结果的关键信息
-    logger.info(f"AI提取完成：项目名={'有' if result['项目名称'] else '无'}，"
+    logger.info(f"流式结果解析完成：项目名={'有' if result['项目名称'] else '无'}，"
                 f"注册资本={'有' if result['注册资本要求'] else '无'}，"
-                f"证书数={len(result['必须具备的资质证书'])}")  # ← 加
+                f"证书数={len(result['必须具备的资质证书'])}")
     
     return result
+
+
+# ========== 保留原版（兼容性）==========
+@with_retry
+def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
+    """原版非流式提取（保留作为备用）"""
+    full_text = ""
+    for _, current_text in extract_core_fields_streaming(raw_text, api_key):
+        full_text = current_text
+    return parse_streaming_result(full_text)
