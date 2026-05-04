@@ -111,6 +111,10 @@ def show_print_report():
     advice = company_data["advice"]
     company_name = company_data["company_name"]
     
+     # ⭐ 加这个保护
+    if company_name is None or not isinstance(company_name, str):
+        company_name = "未命名公司"
+
     if not risk_rows:
         st.warning("请先完成文件比对，再打印报告。")
         return

@@ -40,6 +40,9 @@ from ui_components import show_print_report
 setup_page()
 inject_print_css()
 init_session_state()
+# 在页面初始化之后加
+if "hidden_risks" not in st.session_state:
+    st.session_state["hidden_risks"] = None
 
 # ========== 标题 ==========
 st.title("投标文件合规预审助手（双文件自动比对）")
@@ -49,6 +52,10 @@ with st.sidebar:
     hidden_risk_clicked = st.button("🔍 一键审计隐藏风险", use_container_width=True)
     if st.button("🖨️ 打开打印报告", use_container_width=True):
         show_print_report()
+    st.divider()
+    st.markdown("### 📜 历史记录")
+    if st.button("查看历史分析", use_container_width=True):
+        st.session_state["show_history"] = True    
 
 # ========== API配置 ==========
 with st.expander("AI 配置（DeepSeek API）", expanded=False):
@@ -237,10 +244,27 @@ if run_compare:
                 st.session_state["last_risk_rows"] = all_results[0]["risk_rows"]
                 st.session_state["risk_results"] = all_results[0]["risk_rows"]
                 st.session_state["last_advice"] = build_advice(all_results[0]["compare_result"])
-                st.session_state["all_results"] = all_results
                 st.session_state["analysis_ready"] = True
                 logger.info("分析完成，结果已保存到 session_state")
                 st.success("🎉 分析完成！")
+                if st.session_state.get("hidden_risks") is None:
+                    st.info("💡 点击左侧「一键审计隐藏风险」完善报告，扫描结果将自动存入历史记录。")
+                # 保存到历史记录
+                from history_db import save_analysis
+
+                tender_name = core.get("项目名称") or "未命名标书"
+                if len(all_results) > 1:
+                    best_name = min(all_results, key=lambda r: len(r["compare_result"]["missing_certs"]))["name"]
+                else:
+                    best_name = all_results[0]["name"]
+
+                save_analysis(
+                        tender_name, 
+                        all_results, 
+                        best_name,
+                        st.session_state.get("hidden_risks", []),  # ← 加上风险扫描结果
+                        core 
+                    )   
 
         else:
             # ===== 降级方案 =====
@@ -280,10 +304,27 @@ if st.session_state.get("analysis_ready"):
     st.divider()
 
     all_results = st.session_state.get("all_results", [])
+    
+    # ⭐ 如果是从历史记录加载的，恢复 last_core
+    if not st.session_state.get("last_core") and all_results:
+        # 从历史数据中重建 last_core（用第一个结果中的标书信息）
+        st.session_state["last_core"] = {
+            "项目名称": "历史记录",
+            "注册资本要求": "",
+            "必须具备的资质证书": [],
+            "投标截止时间": ""
+        }
+    
     if len(all_results) > 1:
         company_names = [r["name"] for r in all_results]
-        selected = st.selectbox("选择查看的公司", company_names,key="selected_company")
+        selected = st.selectbox(
+            "选择查看的公司", 
+            company_names,
+            key="selected_company"
+        )
         selected_result = all_results[company_names.index(selected)]
+    elif len(all_results) == 1:
+        selected_result = all_results[0]
     else:
         selected_result = None
 
@@ -291,6 +332,8 @@ if st.session_state.get("analysis_ready"):
         with st.expander("📋 标书核心要求", expanded=False):
             st.json(st.session_state["last_core"])
             render_core_fields_table(st.session_state["last_core"])
+
+  
 
     if selected_result:
         st.markdown(f"### 🏢 {selected_result['name']}")
@@ -331,6 +374,11 @@ if hidden_risk_clicked:
                 )
                 set_cache(st.session_state["tender_file_bytes"], "hidden_risks", {"risks": risks})
                 st.session_state["hidden_risks"] = risks
+
+                # 更新最近一条历史记录的风险数据
+                from history_db import update_latest_risks
+                update_latest_risks(risks)
+
                 logger.info(f"隐藏风险扫描成功，发现 {len(risks)} 个风险项")
             except Exception as exc:
                 logger.error(f"隐藏风险扫描失败: {exc}")
@@ -340,6 +388,8 @@ if hidden_risk_clicked:
             logger.info("隐藏风险从磁盘缓存加载")
             st.success("✅ 隐藏风险已从缓存加载")
             st.session_state["hidden_risks"] = cache_data.get("risks", [])
+            from history_db import update_latest_risks
+            update_latest_risks(st.session_state["hidden_risks"])
         st.rerun()
 
 if st.session_state.get("hidden_risks") is not None:
@@ -351,3 +401,44 @@ if st.session_state.get("hidden_risks") is not None:
             st.warning(f"{i}. {risk}")
     else:
         st.success("未发现明显风险")
+# ========== 历史记录 ==========
+if st.session_state.get("show_history"):
+    from history_db import get_all_history, get_history_detail, delete_history
+    
+    st.divider()
+    st.markdown("## 📜 历史分析记录")
+    
+    records = get_all_history()
+    if not records:
+        st.info("暂无历史记录")
+    else:
+        for rec in records:
+            rec_id, created_at, tender_name, company_count, best_company = rec
+            col1, col2, col3 = st.columns([3, 2, 1])
+            with col1:
+                st.write(f"**{tender_name}**")
+                st.caption(f"{created_at} · {company_count}家公司")
+            with col2:
+                if best_company:
+                    st.write(f"🏆 {best_company}")
+            with col3:
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("📋", key=f"hist_{rec_id}", help="查看详情"):
+                        detail = get_history_detail(rec_id)
+                        if detail:
+                            results = detail["all_results"]
+                            st.session_state["all_results"] = detail["all_results"]
+                            st.session_state["hidden_risks"] = detail["hidden_risks"]  # ← 恢复风险扫描
+                            st.session_state["last_risk_rows"] = results[0]["risk_rows"]
+                            st.session_state["risk_results"] = results[0]["risk_rows"]
+                            st.session_state["last_advice"] = build_advice(results[0]["compare_result"])
+                            st.session_state["last_core"] = detail.get("core", {})  # ← 恢复标书信息
+                            st.session_state["analysis_ready"] = True
+                            st.session_state["show_history"] = False
+                        st.rerun()
+                with c2:
+                    if st.button("🗑", key=f"del_{rec_id}", help="删除记录"):
+                        delete_history(rec_id)
+                        st.rerun()
+                   
