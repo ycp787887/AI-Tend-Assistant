@@ -264,7 +264,8 @@ if run_compare:
                         best_name,
                         st.session_state.get("hidden_risks", []),  # ← 加上风险扫描结果
                         core 
-                    )   
+                    )
+                logger.info(f"已保存到历史记录：{tender_name}，{len(all_results)}家公司，最优：{best_name}")       
 
         else:
             # ===== 降级方案 =====
@@ -425,6 +426,7 @@ if st.session_state.get("show_history"):
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("📋", key=f"hist_{rec_id}", help="查看详情"):
+                        logger.info(f"回看历史记录 ID={rec_id}：{tender_name}")
                         detail = get_history_detail(rec_id)
                         if detail:
                             results = detail["all_results"]
@@ -439,6 +441,7 @@ if st.session_state.get("show_history"):
                         st.rerun()
                 with c2:
                     if st.button("🗑", key=f"del_{rec_id}", help="删除记录"):
+                        logger.info(f"删除历史记录 ID={rec_id}：{tender_name}")
                         delete_history(rec_id)
                         st.rerun()
                    
