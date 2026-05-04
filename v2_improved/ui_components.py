@@ -163,9 +163,10 @@ def show_print_report():
         </style>
     </head>
     <body>
-        <div class="no-print" style="margin-bottom:20px;">
-            <button class="btn" onclick="window.print()">🖨️ 立即打印报告</button>
-            <button class="btn" onclick="window.close()" style="background:#95a5a6;">关闭窗口</button>
+        <div class="no-print" style="margin-bottom:20px; display: flex; gap: 15px; align-items: center;">
+            <button class="btn" onclick="window.print()" style="margin: 0;">🖨️ 立即打印报告</button>
+            <button class="btn" onclick="this.closest('.no-print').parentElement.style.display='none'" style="background:#95a5a6; margin: 0;">✕ 收起报告</button>
+            <span style="color: #888; font-size: 13px;">💡 打印后点击「收起报告」回到分析页面</span>
         </div>
         <h1>📋 投标合规风险评估报告</h1>
         <div class="info-box">
