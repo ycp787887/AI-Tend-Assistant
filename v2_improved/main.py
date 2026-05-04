@@ -70,7 +70,7 @@ uploaded_tender = st.file_uploader(
     "📄 上传招标文件（PDF）", type=["pdf"], accept_multiple_files=False, key="upload_tender"
 )
 uploaded_company = st.file_uploader(
-    "📄 上传公司资质证明（PDF）", type=["pdf"], accept_multiple_files=False, key="upload_company"
+    "📄 上传公司资质证明（PDF）", type=["pdf"], accept_multiple_files=True, key="upload_company"
 )
 
 # ========== 简单磁盘缓存 ==========
@@ -105,18 +105,22 @@ if uploaded_tender is not None:
         st.session_state["tender_file_bytes"] = tender_bytes
         clear_cached_analysis()
 
-if uploaded_company is not None:
-    company_bytes = uploaded_company.getvalue()
-    if uploaded_company.name != st.session_state.get("company_file_name") or company_bytes != st.session_state.get("company_file_bytes"):
-        st.session_state["company_file_name"] = uploaded_company.name
-        st.session_state["company_file_bytes"] = company_bytes
+# ✅ 只在文件变化时才更新
+if uploaded_company:
+    new_files = [{"name": f.name, "bytes": f.getvalue()} for f in uploaded_company]
+    old_files = st.session_state.get("company_files", [])
+    if new_files != old_files:
+        st.session_state["company_files"] = new_files
         clear_cached_analysis()
 
 # 显示状态
 if st.session_state.get("tender_file_name"):
     st.info(f"📄 招标文件：{st.session_state['tender_file_name']}")
-if st.session_state.get("company_file_name"):
-    st.info(f"📄 公司资质：{st.session_state['company_file_name']}")
+if st.session_state.get("company_files"):
+    count = len(st.session_state["company_files"])
+    names = ", ".join([f["name"] for f in st.session_state["company_files"]])
+    st.info(f"📄 公司资质（{count}份）：{names}")
+
 
 # ========== 明确的位置提示 ==========
 st.caption("""
@@ -131,36 +135,27 @@ st.caption("""
 # ========== 开始比对按钮 ==========
 run_compare = st.button(
     "🚀 开始双文件智能比对",
-    disabled=not (st.session_state.get("tender_file_bytes") and st.session_state.get("company_file_bytes")),
+    disabled=not (st.session_state.get("tender_file_bytes") and st.session_state.get("company_files")),
     use_container_width=True
 )
 
 if run_compare:
     logger.info("用户点击「开始比对」")
     try:
-        # 1. 解析PDF
+        # 1. 解析PDF - 标书
         with st.spinner("📖 正在解析招标文件..."):
             tender_text = extract_pdf_text(st.session_state["tender_file_bytes"])
         if not tender_text.strip():
             st.error("❌ 招标文件未提取到文本，请检查是否为扫描件。")
             st.stop()
         logger.info(f"招标文件解析成功，文本长度: {len(tender_text)} 字符")
-
-        with st.spinner("📖 正在解析公司资质文件..."):
-            company_text = extract_pdf_text(st.session_state["company_file_bytes"])
-        if not company_text.strip():
-            st.error("❌ 公司资质文件未提取到文本，请检查是否为扫描件。")
-            st.stop()
-        logger.info(f"公司资质文件解析成功，文本长度: {len(company_text)} 字符")
-
         st.session_state["last_full_text"] = tender_text
-        st.session_state["company_full_text"] = company_text
 
         # 2. AI提取（或降级兜底）
         if user_key and user_key.strip():
             logger.info("检测到 API Key，使用流式 AI 提取")
 
-            # ===== AI提取标书要求 =====
+            # ===== 提取标书要求（只做1次）=====
             core = get_cache(st.session_state["tender_file_bytes"], "tender_core")
             if core is None:
                 logger.info("标书要求缓存未命中，使用流式 AI 提取")
@@ -177,53 +172,102 @@ if run_compare:
                 logger.info("标书要求从磁盘缓存加载")
                 st.success("⚡ 标书要求已从缓存加载")
 
-            # ===== AI提取公司资质 =====
-            company_profile = get_cache(st.session_state["company_file_bytes"], "company_profile")
-            if company_profile is None:
-                logger.info("公司资质缓存未命中，使用流式 AI 提取")
-                display_placeholder = st.empty()
-                full_text = ""
-                for token, current_text in extract_company_profile_streaming(company_text, user_key.strip()):
-                    full_text = current_text
-                    display_placeholder.markdown(f"### 🤖 AI 正在分析公司资质...\n\n```json\n{full_text}▌\n```")
-                company_profile = parse_company_streaming_result(full_text)
-                display_placeholder.markdown(f"### ✅ 公司资质提取完成\n\n```json\n{json.dumps(company_profile, ensure_ascii=False, indent=2)}\n```")
-                set_cache(st.session_state["company_file_bytes"], "company_profile", company_profile)
-                logger.info("公司资质提取成功，已写入缓存")
-            else:
-                logger.info("公司资质从磁盘缓存加载")
-                st.success("⚡ 公司资质已从缓存加载")
+            # ===== 循环分析每份公司资质 =====
+            all_results = []
+            for idx, company_file in enumerate(st.session_state["company_files"]):
+                company_name = company_file["name"]
+                company_bytes = company_file["bytes"]
+
+                st.markdown(f"---")
+                st.markdown(f"### 🏢 正在分析第 {idx+1}/{len(st.session_state['company_files'])} 份：{company_name}")
+
+                company_text = extract_pdf_text(company_bytes)
+                if not company_text.strip():
+                    st.warning(f"⚠️ {company_name} 未提取到文本，跳过")
+                    continue
+
+                company_profile = get_cache(company_bytes, "company_profile")
+                if company_profile is None:
+                    logger.info(f"{company_name} 缓存未命中，使用流式 AI 提取")
+                    display_placeholder = st.empty()
+                    full_text = ""
+                    for token, current_text in extract_company_profile_streaming(company_text, user_key.strip()):
+                        full_text = current_text
+                        display_placeholder.markdown(f"```json\n{full_text}▌\n```")
+                    company_profile = parse_company_streaming_result(full_text)
+                    set_cache(company_bytes, "company_profile", company_profile)
+                    logger.info(f"{company_name} 提取成功，已写入缓存")
+                else:
+                    st.success(f"⚡ {company_name} 已从缓存加载")
+
+                compare_result = compare_with_company_profile(core, company_profile)
+                risk_rows = build_risk_rows(core, compare_result)
+
+                all_results.append({
+                    "name": company_name,
+                    "profile": company_profile,
+                    "compare_result": compare_result,
+                    "risk_rows": risk_rows
+                })
+
+                st.markdown(f"**{company_name} 对比结果：**")
+                render_risk_table(risk_rows)
+
+            # ===== 多公司汇总 =====
+            if len(all_results) > 1:
+                st.markdown("---")
+                st.markdown("## 📊 多公司对比汇总")
+                summary = []
+                for r in all_results:
+                    missing_count = len(r["compare_result"]["missing_certs"])
+                    capital_ok = "✅" if not r["compare_result"]["capital_not_met"] else "✖"
+                    summary.append({
+                        "公司": r["name"],
+                        "注册资本": capital_ok,
+                        "缺失证书数": missing_count,
+                    })
+                st.table(summary)
+                best = min(all_results, key=lambda r: len(r["compare_result"]["missing_certs"]))
+                st.success(f"🏆 推荐选择：**{best['name']}**")
+
+            # ===== 保存结果 =====
+            if all_results:
+                st.session_state["last_core"] = core
+                st.session_state["company_profile"] = all_results[0]["profile"]
+                st.session_state["last_risk_rows"] = all_results[0]["risk_rows"]
+                st.session_state["risk_results"] = all_results[0]["risk_rows"]
+                st.session_state["last_advice"] = build_advice(all_results[0]["compare_result"])
+                st.session_state["all_results"] = all_results
+                st.session_state["analysis_ready"] = True
+                logger.info("分析完成，结果已保存到 session_state")
+                st.success("🎉 分析完成！")
+
         else:
-            # ===== 降级方案：用正则提取 =====
+            # ===== 降级方案 =====
             logger.warning("API Key 为空，启用降级方案（正则提取）")
             st.warning("⚠️ 未配置 API Key，当前使用本地规则兜底提取。")
             core = fallback_extract_core_fields(tender_text)
-            company_profile = fallback_extract_company_profile(company_text)
-            logger.info("降级提取完成")
+
             if not core.get("项目名称") and not core.get("注册资本要求"):
                 st.info("💡 正则未能提取到关键信息，建议配置 API Key 以获得准确结果。")
 
-        # 3. 比较
-        logger.info("开始对比标书要求与公司资质")
-        compare_result = compare_with_company_profile(core, company_profile)
-        if compare_result.get("capital_not_met"):
-            logger.warning(f"注册资本不达标：要求{compare_result.get('required_capital_text')}，实际{compare_result.get('company_capital_text')}")
-        if compare_result.get("missing_certs"):
-            logger.warning(f"资质证书缺失：{compare_result['missing_certs']}")
-        risk_rows = build_risk_rows(core, compare_result)
-        advice_text = build_advice(compare_result)
-        logger.info(f"比对完成，建议：{advice_text[:50]}...")
+            # 降级只处理第一份
+            if st.session_state.get("company_files"):
+                first_company = st.session_state["company_files"][0]
+                company_text = extract_pdf_text(first_company["bytes"])
+                company_profile = fallback_extract_company_profile(company_text)
+                logger.info("降级提取完成")
 
-        # 4. 保存结果
-        st.session_state["last_core"] = core
-        st.session_state["company_profile"] = company_profile
-        st.session_state["last_risk_rows"] = risk_rows
-        st.session_state["risk_results"] = risk_rows
-        st.session_state["last_advice"] = advice_text
-        st.session_state["analysis_ready"] = True
-        logger.info("分析完成，结果已保存到 session_state")
-        st.success("🎉 分析完成！")
-            
+                compare_result = compare_with_company_profile(core, company_profile)
+                risk_rows = build_risk_rows(core, compare_result)
+                st.session_state["last_core"] = core
+                st.session_state["company_profile"] = company_profile
+                st.session_state["last_risk_rows"] = risk_rows
+                st.session_state["risk_results"] = risk_rows
+                st.session_state["last_advice"] = build_advice(compare_result)
+                st.session_state["analysis_ready"] = True
+                st.success("🎉 分析完成！")
+
     except Exception as exc:
         logger.error(f"分析失败: {type(exc).__name__} - {exc}")
         st.error(f"❌ 分析失败：{type(exc).__name__}: {exc}")
@@ -234,14 +278,25 @@ if run_compare:
 if st.session_state.get("analysis_ready"):
     logger.info("开始展示分析结果")
     st.divider()
+
+    all_results = st.session_state.get("all_results", [])
+    if len(all_results) > 1:
+        company_names = [r["name"] for r in all_results]
+        selected = st.selectbox("选择查看的公司", company_names,key="selected_company")
+        selected_result = all_results[company_names.index(selected)]
+    else:
+        selected_result = None
+
     if st.session_state.get("last_core"):
         with st.expander("📋 标书核心要求", expanded=False):
             st.json(st.session_state["last_core"])
             render_core_fields_table(st.session_state["last_core"])
-    if st.session_state.get("company_profile"):
-        with st.expander("🏢 公司资质信息", expanded=False):
-            st.json(st.session_state["company_profile"])
-    if st.session_state.get("risk_results"):
+
+    if selected_result:
+        st.markdown(f"### 🏢 {selected_result['name']}")
+        render_risk_table(selected_result["risk_rows"])
+        st.info(build_advice(selected_result["compare_result"]))
+    elif st.session_state.get("risk_results"):
         st.markdown("### 📊 企业匹配结果")
         render_risk_table(st.session_state["risk_results"])
         st.markdown("### 💬 建议")
@@ -270,7 +325,6 @@ if hidden_risk_clicked:
                     display_placeholder.markdown(
                         f"### 🔍 AI 正在扫描隐藏风险...\n\n```json\n{full_text}▌\n```"
                     )
-                
                 risks = parse_risk_streaming_result(full_text)
                 display_placeholder.markdown(
                     f"### ✅ 隐藏风险扫描完成\n\n```json\n{json.dumps({'risks': risks}, ensure_ascii=False, indent=2)}\n```"
@@ -291,7 +345,7 @@ if hidden_risk_clicked:
 if st.session_state.get("hidden_risks") is not None:
     risk_count = len(st.session_state["hidden_risks"])
     logger.info(f"展示隐藏风险结果：{risk_count} 个风险项")
-    st.markdown("### ⚠️ 隐藏风险扫描结果")
+    st.markdown(f"### ⚠️ 隐藏风险扫描结果（基于标书，共{risk_count}项）")
     if st.session_state["hidden_risks"]:
         for i, risk in enumerate(st.session_state["hidden_risks"], 1):
             st.warning(f"{i}. {risk}")

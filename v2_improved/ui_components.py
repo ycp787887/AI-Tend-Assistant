@@ -7,6 +7,38 @@ import streamlit.components.v1 as components
 from html import escape
 from io import BytesIO
 from xhtml2pdf import pisa
+from report_builder import build_advice
+
+
+def _get_current_company_data():
+    """获取当前应该打印的公司数据"""
+    all_results = st.session_state.get("all_results", [])
+    
+    if not all_results:
+        # 旧版兼容：无多公司数据，用旧字段
+        return {
+            "risk_rows": st.session_state.get("last_risk_rows", []),
+            "advice": st.session_state.get("last_advice", ""),
+            "company_name": st.session_state.get("company_file_name", "未知公司")
+        }
+    
+    # 获取当前选中的公司名
+    selected = st.session_state.get("selected_company", all_results[0]["name"])
+    for r in all_results:
+        if r["name"] == selected:
+            return {
+                "risk_rows": r["risk_rows"],
+                "advice": build_advice(r["compare_result"]),
+                "company_name": r["name"]
+            }
+    
+    # 兜底：返回第一家
+    return {
+        "risk_rows": all_results[0]["risk_rows"],
+        "advice": build_advice(all_results[0]["compare_result"]),
+        "company_name": all_results[0]["name"]
+    }
+
 
 def generate_pdf_report(
     core: dict, risk_rows: list[dict], advice: str, hidden_risks: list[str]
@@ -70,15 +102,22 @@ def generate_pdf_report(
         raise RuntimeError("PDF 生成失败")
     return buffer.getvalue()
 
+
 def show_print_report():
-    """在新窗口显示可打印的报告"""
-    if not st.session_state.get("last_core") or not st.session_state.get("last_risk_rows"):
+    """在新窗口显示可打印的报告——自动打印当前选中的公司"""
+    
+    company_data = _get_current_company_data()
+    risk_rows = company_data["risk_rows"]
+    advice = company_data["advice"]
+    company_name = company_data["company_name"]
+    
+    if not risk_rows:
         st.warning("请先完成文件比对，再打印报告。")
         return
     
     # 生成表格行
     table_rows = ""
-    for row in st.session_state["last_risk_rows"]:
+    for row in risk_rows:
         result = row.get("结果", "")
         if "✖" in result:
             color = "#d32f2f"
@@ -109,7 +148,7 @@ def show_print_report():
     <html>
     <head>
         <meta charset="utf-8">
-        <title>投标合规风险评估报告</title>
+        <title>投标合规风险评估报告 - {escape(company_name)}</title>
         <style>
             body {{ font-family: 'Microsoft YaHei', Arial, sans-serif; padding: 30px; max-width: 1200px; margin: 0 auto; }}
             h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
@@ -130,13 +169,14 @@ def show_print_report():
         </div>
         <h1>📋 投标合规风险评估报告</h1>
         <div class="info-box">
-            <p><strong>项目名称：</strong>{escape(str(st.session_state["last_core"].get("项目名称", "未提取到")))}</p>
-            <p><strong>投标截止时间：</strong>{escape(str(st.session_state["last_core"].get("投标截止时间", "未提取到")))}</p>
+            <p><strong>公司名称：</strong>{escape(company_name)}</p>
+            <p><strong>项目名称：</strong>{escape(str(st.session_state.get("last_core", {}).get("项目名称", "未提取到")))}</p>
+            <p><strong>投标截止时间：</strong>{escape(str(st.session_state.get("last_core", {}).get("投标截止时间", "未提取到")))}</p>
         </div>
         <h2>📊 企业匹配结果</h2>
         <table>{table_rows}</table>
         <h2>💬 建议</h2>
-        <div class="info-box"><p>{escape(st.session_state.get("last_advice", "暂无建议"))}</p></div>
+        <div class="info-box"><p>{escape(advice)}</p></div>
         <h2>⚠️ 隐藏风险扫描结果</h2>
         <ul>{risks_list}</ul>
     </body>
