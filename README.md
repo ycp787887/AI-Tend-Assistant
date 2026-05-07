@@ -84,6 +84,12 @@ API调用失败时自动重试三次，等待时间逐次翻倍（1秒->2秒->4�
 - AI 仅接收资格要求相关段落，而非全文
 - Token 消耗降低约 60%
 
+###结构化输出
+- 新增 models.py：Pydantic 定义输出格式
+- tender_extractor.py：改用 Instructor 保证格式100%正确
+- company_extractor.py：同理，消除 JSONDecodeError
+- 流式打字机效果移除，稳定性优先
+
 ### 已知限制
 
 **打印报告无法通过 `window.close()` 关闭窗口**

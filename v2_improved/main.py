@@ -22,11 +22,11 @@ from config import (
 )
 from pdf_utils import extract_pdf_text
 from tender_extractor import (
-    extract_core_fields_streaming, parse_streaming_result,
+    extract_core_fields_structured,
     fallback_extract_core_fields
 )
 from company_extractor import (
-    extract_company_profile_streaming, parse_company_streaming_result,
+    extract_company_profile_structured,
     fallback_extract_company_profile
 )
 from comparator import compare_with_company_profile
@@ -165,14 +165,9 @@ if run_compare:
             # ===== 提取标书要求（只做1次）=====
             core = get_cache(st.session_state["tender_file_bytes"], "tender_core")
             if core is None:
-                logger.info("标书要求缓存未命中，使用流式 AI 提取")
-                display_placeholder = st.empty()
-                full_text = ""
-                for token, current_text in extract_core_fields_streaming(tender_text, user_key.strip()):
-                    full_text = current_text
-                    display_placeholder.markdown(f"### 🤖 AI 正在分析标书要求...\n\n```json\n{full_text}▌\n```")
-                core = parse_streaming_result(full_text)
-                display_placeholder.markdown(f"### ✅ 标书要求提取完成\n\n```json\n{json.dumps(core, ensure_ascii=False, indent=2)}\n```")
+                logger.info("标书要求缓存未命中，使用结构化 AI 提取")
+                with st.spinner("🤖 AI 正在分析标书要求..."):
+                    core = extract_core_fields_structured(tender_text, user_key.strip())
                 set_cache(st.session_state["tender_file_bytes"], "tender_core", core)
                 logger.info("标书要求提取成功，已写入缓存")
             else:
@@ -198,14 +193,15 @@ if run_compare:
                     logger.info(f"{company_name} 缓存未命中，使用流式 AI 提取")
                     display_placeholder = st.empty()
                     full_text = ""
-                    for token, current_text in extract_company_profile_streaming(company_text, user_key.strip()):
-                        full_text = current_text
-                        display_placeholder.markdown(f"```json\n{full_text}▌\n```")
-                    company_profile = parse_company_streaming_result(full_text)
-                    set_cache(company_bytes, "company_profile", company_profile)
-                    logger.info(f"{company_name} 提取成功，已写入缓存")
-                else:
-                    st.success(f"⚡ {company_name} 已从缓存加载")
+                    company_profile = get_cache(company_bytes, "company_profile")
+                    if company_profile is None:
+                        logger.info(f"{company_name} 缓存未命中，使用结构化 AI 提取")
+                        with st.spinner(f"🤖 AI 正在分析 {company_name}..."):
+                            company_profile = extract_company_profile_structured(company_text, user_key.strip())
+                        set_cache(company_bytes, "company_profile", company_profile)
+                        logger.info(f"{company_name} 提取成功，已写入缓存")
+                    else:
+                        st.success(f"⚡ {company_name} 已从缓存加载")
 
                 compare_result = compare_with_company_profile(core, company_profile)
                 risk_rows = build_risk_rows(core, compare_result)

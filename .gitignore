@@ -1,7 +1,8 @@
 .env
-__pycache__
-.venv
-cache
+cache/
+logs/
 *.db
+__pycache__/
+.venv/
 chroma/
 .cache/

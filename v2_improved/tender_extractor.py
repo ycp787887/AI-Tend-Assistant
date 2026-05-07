@@ -1,15 +1,15 @@
 # tender_extractor.py
 # 这个文件负责：从招标文件里挖出关键信息
-# 想改提取哪些字段？想改AI提示词？来这里
 
 import json
 import re
-from typing import Any, Generator
+from typing import Any
 from openai import OpenAI
+import instructor
+from models import TenderInfo
 from config import DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, LLM_TIMEOUT_SECONDS
 from retry_handler import with_retry
 from logger_config import logger
-
 
 
 # ========== 工具函数 ==========
@@ -77,97 +77,72 @@ def fallback_extract_core_fields(raw_text: str) -> dict[str, Any]:
     return result
 
 
-# ========== AI提取流式版（主力） ==========
+# ========== AI提取（主力：Instructor 结构化输出）==========
 @with_retry
-def extract_core_fields_streaming(raw_text: str, api_key: str) -> Generator:
+def extract_core_fields_structured(raw_text: str, api_key: str) -> dict[str, Any]:
     """
-    流式AI提取标书要求——逐字返回
-    用于打字机效果展示
+    用 Instructor 结构化提取标书要求
+    保证输出格式100%正确
     """
-    logger.info(f"开始流式AI提取标书要求，文本长度: {len(raw_text)} 字符")
+    logger.info(f"开始结构化提取标书要求，文本长度: {len(raw_text)} 字符")
     
-    client = OpenAI(
-        api_key=api_key,
-        base_url=DEEPSEEK_BASE_URL,
-        timeout=LLM_TIMEOUT_SECONDS,
-        max_retries=0
+    client = instructor.from_openai(
+        OpenAI(
+            api_key=api_key,
+            base_url=DEEPSEEK_BASE_URL,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
     )
     
-# ===== 向量检索相关段落 =====
-    from vector_store import search_relevant  #一个函数，负责"找相关段落"
-    relevant_chunks = search_relevant(raw_text, "投标人资格要求 注册资本 资质证书 截止时间") #返回结果
-    relevant_text = "\n".join(relevant_chunks)[:8000] #整本标书的文字
+    # ===== 向量检索相关段落 =====
+    from vector_store import search_relevant
+    relevant_chunks = search_relevant(raw_text, "投标人资格要求 注册资本 资质证书 截止时间")
+    relevant_text = "\n".join(relevant_chunks)[:8000]
     logger.info(f"检索到 {len(relevant_chunks)} 个相关段落，共 {len(relevant_text)} 字")
-        
+    
     prompt = f"""
-你是招投标信息抽取助手。请从下面原始文本中精准提取以下字段，并仅输出一个 JSON 对象：
-- 项目名称: string | null
-- 注册资本要求: string | null
-- 必须具备的资质证书: string[]（若无则 []）
-- 投标截止时间: string | null
+你是招投标信息抽取助手。请从下面原始文本中精准提取以下字段：
+- 项目名称
+- 注册资本要求
+- 必须具备的资质证书（列表）
+- 投标截止时间
 
 要求：
-1) 严禁输出除 JSON 外的任何文字。
-2) 不确定时返回 null，不要臆造。
-3) "必须具备的资质证书"只保留证书/资质名称，不要附带解释。
+1) 不确定时返回 null 或空列表，不要臆造。
+2) 资质证书只保留证书/资质名称，不要附带解释。
 
 原始文本：
-{relevant_text}  # ← 向量检索找到的相关段落，不是全文
+{relevant_text}
 """
     
-    logger.info("发送流式请求到 DeepSeek API")
+    logger.info("发送请求到 DeepSeek API（Instructor 模式）")
+    
     response = client.chat.completions.create(
         model=DEEPSEEK_MODEL,
         temperature=0,
-        stream=True,
-        response_format={"type": "json_object"},
+        response_model=TenderInfo,
         messages=[
-            {"role": "system", "content": "你是严谨的信息抽取引擎，只返回合法 JSON。"},
+            {"role": "system", "content": "你是严谨的信息抽取引擎。"},
             {"role": "user", "content": prompt},
         ],
     )
     
-    full_text = ""
-    for chunk in response:
-        if chunk.choices[0].delta.content:
-            token = chunk.choices[0].delta.content
-            full_text += token
-            yield token, full_text
-    
-    logger.info(f"流式提取完成，总长度: {len(full_text)} 字符")
-
-
-def parse_streaming_result(full_text: str) -> dict[str, Any]:
-    """解析流式输出的最终结果"""
-    import json
-    try:
-        data = json.loads(full_text)
-    except json.JSONDecodeError:
-        arr_match = re.search(r"\[.*\]", full_text, flags=re.S)
-        if arr_match:
-            data = json.loads(arr_match.group(0))
-        else:
-            data = {}
-    
     result = {
-        "项目名称": data.get("项目名称"),
-        "注册资本要求": data.get("注册资本要求"),
-        "必须具备的资质证书": data.get("必须具备的资质证书", []),
-        "投标截止时间": data.get("投标截止时间"),
+        "项目名称": response.项目名称,
+        "注册资本要求": response.注册资本要求,
+        "必须具备的资质证书": response.必须具备的资质证书,
+        "投标截止时间": response.投标截止时间,
     }
     
-    logger.info(f"流式结果解析完成：项目名={'有' if result['项目名称'] else '无'}，"
+    logger.info(f"结构化提取完成：项目名={'有' if result['项目名称'] else '无'}，"
                 f"注册资本={'有' if result['注册资本要求'] else '无'}，"
                 f"证书数={len(result['必须具备的资质证书'])}")
     
     return result
 
 
-# ========== 保留原版（兼容性）==========
-@with_retry
+# ========== 兼容旧调用 ==========
 def extract_core_fields_with_ai(raw_text: str, api_key: str) -> dict[str, Any]:
-    """原版非流式提取（保留作为备用）"""
-    full_text = ""
-    for _, current_text in extract_core_fields_streaming(raw_text, api_key):
-        full_text = current_text
-    return parse_streaming_result(full_text)
+    """兼容旧接口，内部调用结构化版本"""
+    return extract_core_fields_structured(raw_text, api_key)

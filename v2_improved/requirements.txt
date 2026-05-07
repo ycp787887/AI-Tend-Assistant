@@ -7,3 +7,4 @@ xhtml2pdf
 python-dotenv
 chromadb
 langchain-text-splitters
+instructor
