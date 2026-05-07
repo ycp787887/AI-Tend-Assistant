@@ -11,6 +11,7 @@ from retry_handler import with_retry
 from logger_config import logger
 
 
+
 # ========== 工具函数 ==========
 def get_qualification_snippet(full_text: str, max_chars: int = 5000) -> str:
     """从大段文字里截取'资格要求'附近的内容"""
@@ -92,6 +93,12 @@ def extract_core_fields_streaming(raw_text: str, api_key: str) -> Generator:
         max_retries=0
     )
     
+# ===== 向量检索相关段落 =====
+    from vector_store import search_relevant  #一个函数，负责"找相关段落"
+    relevant_chunks = search_relevant(raw_text, "投标人资格要求 注册资本 资质证书 截止时间") #返回结果
+    relevant_text = "\n".join(relevant_chunks)[:8000] #整本标书的文字
+    logger.info(f"检索到 {len(relevant_chunks)} 个相关段落，共 {len(relevant_text)} 字")
+        
     prompt = f"""
 你是招投标信息抽取助手。请从下面原始文本中精准提取以下字段，并仅输出一个 JSON 对象：
 - 项目名称: string | null
@@ -105,7 +112,7 @@ def extract_core_fields_streaming(raw_text: str, api_key: str) -> Generator:
 3) "必须具备的资质证书"只保留证书/资质名称，不要附带解释。
 
 原始文本：
-{raw_text[:12000]}
+{relevant_text}  # ← 向量检索找到的相关段落，不是全文
 """
     
     logger.info("发送流式请求到 DeepSeek API")

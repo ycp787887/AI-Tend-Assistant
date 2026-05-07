@@ -74,10 +74,10 @@ with st.expander("AI 配置（DeepSeek API）", expanded=False):
 
 # ========== 文件上传 ==========
 uploaded_tender = st.file_uploader(
-    "📄 上传招标文件（PDF）", type=["pdf"], accept_multiple_files=False, key="upload_tender"
+    "📄 上传招标文件（PDF）", type=["pdf", "txt"], accept_multiple_files=False, key="upload_tender"
 )
 uploaded_company = st.file_uploader(
-    "📄 上传公司资质证明（PDF）", type=["pdf"], accept_multiple_files=True, key="upload_company"
+    "📄 上传公司资质证明（PDF）", type=["pdf", "txt"], accept_multiple_files=True, key="upload_company"
 )
 
 # ========== 简单磁盘缓存 ==========

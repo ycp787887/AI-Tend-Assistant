@@ -5,3 +5,5 @@ openai
 reportlab
 xhtml2pdf
 python-dotenv
+chromadb
+langchain-text-splitters
