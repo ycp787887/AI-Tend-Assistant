@@ -11,6 +11,8 @@ from logger_config import logger
 # ========== 磁盘缓存工具 ==========
 import hashlib
 from pathlib import Path
+from pdf_utils import extract_pdf_text
+        
 
 # ========== 环境变量读取env文件 ==========
 from dotenv import load_dotenv
@@ -35,6 +37,7 @@ from report_builder import (
     build_advice, build_risk_rows, render_risk_table, render_core_fields_table
 )
 from ui_components import show_print_report
+from pdf_utils import extract_pdf_text
 
 # ========== 页面初始化 ==========
 setup_page()
@@ -55,7 +58,11 @@ with st.sidebar:
     st.divider()
     st.markdown("### 📜 历史记录")
     if st.button("查看历史分析", use_container_width=True):
-        st.session_state["show_history"] = True    
+        st.session_state["show_history"] = True
+    st.divider()
+    st.markdown("### 🤖 Agent 模式")
+    if st.button("启动 Agent 分析", use_container_width=True):
+        st.session_state["agent_mode"] = True
 
 # ========== API配置 ==========
 with st.expander("AI 配置（DeepSeek API）", expanded=False):
@@ -63,9 +70,11 @@ with st.expander("AI 配置（DeepSeek API）", expanded=False):
     
     if env_user_key:
         user_key = env_user_key
+        st.session_state["user_key"] = user_key 
         st.success("已从系统环境变量读取 API Key。")
     else:
         user_key = ""
+        st.session_state["user_key"] = user_key
         st.warning("🔧 降级测试模式：不会调用AI")
     
     st.text_input("模型名称", value=DEEPSEEK_MODEL, disabled=True)
@@ -442,4 +451,53 @@ if st.session_state.get("show_history"):
                         logger.info(f"删除历史记录 ID={rec_id}：{tender_name}")
                         delete_history(rec_id)
                         st.rerun()
-                   
+# ========== Agent 模式 ==========
+if st.session_state.get("agent_mode"):
+    from agent import build_agent, AgentState
+     # ⭐ 自动解析标书文本
+    if st.session_state.get("tender_file_bytes"):
+        tender_text = extract_pdf_text(st.session_state["tender_file_bytes"])
+        st.session_state["last_full_text"] = tender_text
+    
+    st.divider()
+    st.markdown("## 🤖 Agent 分析模式")
+    st.caption("用自然语言告诉 Agent 你想做什么，它会自动调用相应的分析功能。")
+    
+    agent = build_agent()
+    
+    # 初始化状态
+    if "agent_state" not in st.session_state:
+        # 确保有文本
+        tender_text = st.session_state.get("last_full_text", "")
+        if not tender_text and st.session_state.get("tender_file_bytes"):
+            from pdf_utils import extract_pdf_text
+            tender_text = extract_pdf_text(st.session_state["tender_file_bytes"])
+        
+        st.session_state["agent_state"] = {
+            "messages": [],
+            "tender_text": tender_text,
+            "company_files": [
+                {"name": f["name"], "text": extract_pdf_text(f["bytes"])}
+                for f in st.session_state.get("company_files", [])
+            ],
+            "analysis_done": False,
+            "core": None,
+            "all_results": []
+        }
+    
+    # 显示历史消息
+    for msg in st.session_state["agent_state"]["messages"]:
+        role = msg["role"]
+        st.chat_message(role).write(msg["content"])
+    
+    # 输入
+    user_input = st.chat_input("告诉 Agent 你想做什么...")
+    if user_input:
+        st.session_state["agent_state"]["messages"].append(
+            {"role": "user", "content": user_input}
+        )
+        st.session_state["agent_state"] = agent.invoke(
+            st.session_state["agent_state"],
+            {"configurable": {"thread_id": "main"}}
+        )
+        st.rerun()

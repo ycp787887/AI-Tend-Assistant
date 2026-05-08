@@ -66,12 +66,21 @@ def compare_with_company_profile(core: dict[str, Any], company_profile: dict[str
     
     logger.info(f"证书对比：要求{len(required_certs)}项，公司持有{len(company_certs)}项")  # ← 加
     
-    # 找出缺失的证书
+        # 找出缺失的证书
+    def normalize(s):
+        """去掉空格和符号，统一变小写"""
+        return re.sub(r'\s+', '', s).lower()
+
     missing_certs: list[str] = []
     for req in required_certs:
-        if not any(req in own or own in req for own in company_certs):
+        matched = False
+        for own in company_certs:
+            if normalize(req) in normalize(own) or normalize(own) in normalize(req):
+                matched = True
+                break
+        if not matched:
             missing_certs.append(req)
-
+    
     # 3. 判断注册资本是否达标
     capital_not_met = (
         required_capital_wan is not None

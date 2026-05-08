@@ -34,12 +34,16 @@ def build_context(question: str) -> str:
     
     if current_company:
         context += f"【当前公司：{current_company['name']}】\n"
-        context += f"资质信息：{current_company['profile']}\n"
-        context += f"对比结果：{current_company['risk_rows']}\n"
+        context += f"公司资质：{current_company['profile']}\n"
+        context += f"标书要求的证书：{last_core.get('必须具备的资质证书', [])}\n"
+        context += f"公司持有的证书：{current_company['profile'].get('持有的证书列表', [])}\n"
+        context += f"缺失的证书：{current_company['compare_result'].get('missing_certs', [])}\n"
     
     context += f"\n【用户追问】\n{question}"
     
+    logger.info(f"【传给AI的上下文】\n{context}")
     return context
+    
 
 
 def ask_followup(question: str, api_key: str):
