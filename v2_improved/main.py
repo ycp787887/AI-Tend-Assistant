@@ -341,6 +341,8 @@ if st.session_state.get("analysis_ready"):
         render_risk_table(st.session_state["risk_results"])
         st.markdown("### 💬 建议")
         st.info(st.session_state.get("last_advice", "暂无建议"))
+        from chat import render_chat_section
+        render_chat_section(user_key)
 
 # ========== 隐藏风险审计 ==========
 if hidden_risk_clicked:
