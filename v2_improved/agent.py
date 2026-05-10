@@ -2,7 +2,7 @@
 """
 LangGraph Agent
 - 自主决策分析流程
-- 可用工具：RAG检索、结构化提取、多公司对比、追问
+- 工具调用已独立到 main.py，这里只负责分析和聊天
 """
 import streamlit as st
 from typing import TypedDict, Annotated
@@ -14,7 +14,6 @@ from logger_config import logger
 
 # ========== 1. 定义状态 ==========
 class AgentState(TypedDict):
-    """Agent 的记忆"""
     messages: Annotated[list, "对话历史"]
     tender_text: str
     company_files: list
@@ -23,7 +22,7 @@ class AgentState(TypedDict):
     all_results: list
 
 
-# ========== 2. 定义工具节点 ==========
+# ========== 2. 分析节点 ==========
 
 def node_extract_tender(state: AgentState) -> AgentState:
     """提取标书要求"""
@@ -78,13 +77,10 @@ def node_analyze_companies(state: AgentState) -> AgentState:
     
     state["all_results"] = all_results
     state["analysis_done"] = True
-    # ⭐ 同步到 session_state
+    
     if all_results:
         st.session_state["all_results"] = all_results
-        st.session_state["last_risk_rows"] = all_results[0]["risk_rows"]
-        st.session_state["risk_results"] = all_results[0]["risk_rows"]
     
-    # 汇总
     summary = "分析完成：\n"
     for r in all_results:
         missing = len(r["compare_result"]["missing_certs"])
@@ -99,8 +95,9 @@ def node_analyze_companies(state: AgentState) -> AgentState:
     
     return state
 
+
 def node_chat(state: AgentState) -> AgentState:
-    """回答用户问题——直接用 agent_state 的数据"""
+    """回答用户问题——纯AI聊天，不处理工具"""
     from openai import OpenAI
     from config import DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, LLM_TIMEOUT_SECONDS
     
@@ -110,15 +107,13 @@ def node_chat(state: AgentState) -> AgentState:
     if not state.get("analysis_done"):
         state["messages"].append({
             "role": "assistant",
-            "content": "请先上传文件并开始分析，然后我可以回答具体问题。"
+            "content": "请先上传文件并开始分析。"
         })
         return state
     
-    # 直接用 agent_state 的数据构建上下文
     context = "以下是一次投标分析的结果：\n\n"
     context += f"【标书要求】\n{state.get('core', {})}\n\n"
     
-    # 智能匹配公司
     if state.get("all_results"):
         context += "【所有公司分析结果】\n"
         for r in state["all_results"]:
@@ -154,7 +149,6 @@ def node_chat(state: AgentState) -> AgentState:
     
     state["messages"].append({"role": "assistant", "content": full_answer})
     
-    # 同步到 session_state
     if state.get("core"):
         st.session_state["last_core"] = state["core"]
     if state.get("all_results"):
@@ -164,56 +158,19 @@ def node_chat(state: AgentState) -> AgentState:
     return state
 
 
-# ========== 3. 定义路由 ==========
-
-def router(state: AgentState) -> str:
-    """决定下一步做什么"""
-    last_msg = state["messages"][-1]["content"].lower() if state["messages"] else ""
-    
-    # 用户要分析
-    if any(kw in last_msg for kw in ["分析", "对比", "比对", "比较"]):
-        if not state.get("core"):
-            return "extract"
-        elif state.get("company_files") and not state.get("analysis_done"):
-            return "analyze_companies"
-    # ⭐ 已分析完，直接聊天
-    if state.get("analysis_done"):
-        return "chat"
-    
-    # 用户提问
-    if state.get("analysis_done"):
-        return "chat"
-    
-    return "chat"
-
-
-# ========== 4. 构建图 ==========
-
+# ========== 3. 构建图 ==========
 def build_agent():
-    """构建 Agent 流程图"""
     workflow = StateGraph(AgentState)
     
-    # 添加节点
     workflow.add_node("extract", node_extract_tender)
     workflow.add_node("analyze_companies", node_analyze_companies)
     workflow.add_node("chat", node_chat)
     
-    # 设置入口
-    workflow.set_conditional_entry_point(
-        lambda state: "chat" if state.get("analysis_done") else "extract",
-        {"extract": "extract", "chat": "chat"}
-)
-    
-    # 连线
+    workflow.set_entry_point("extract")
     workflow.add_edge("extract", "analyze_companies")
-    workflow.add_conditional_edges(
-        "analyze_companies",
-        lambda state: "chat" if state.get("analysis_done") else "analyze_companies",
-        {"chat": "chat", "analyze_companies": "analyze_companies"}
-    )
+    workflow.add_edge("analyze_companies", "chat")
     workflow.add_edge("chat", END)
     
-    # 编译
     memory = MemorySaver()
     app = workflow.compile(checkpointer=memory)
     

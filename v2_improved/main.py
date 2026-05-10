@@ -379,7 +379,7 @@ if hidden_risk_clicked:
                 risks = parse_risk_streaming_result(full_text)
                 display_placeholder.markdown(
                     f"### ✅ 隐藏风险扫描完成\n\n```json\n{json.dumps({'risks': risks}, ensure_ascii=False, indent=2)}\n```"
-                )
+                    )
                 set_cache(st.session_state["tender_file_bytes"], "hidden_risks", {"risks": risks})
                 st.session_state["hidden_risks"] = risks
 
@@ -465,6 +465,11 @@ if st.session_state.get("agent_mode"):
     
     agent = build_agent()
     
+    # ⭐ 独立变量：控制是否已分析
+    if "agent_has_analyzed" not in st.session_state:
+        st.session_state["agent_has_analyzed"] = False
+
+    
     # 初始化状态
     if "agent_state" not in st.session_state:
         # 确保有文本
@@ -496,8 +501,42 @@ if st.session_state.get("agent_mode"):
         st.session_state["agent_state"]["messages"].append(
             {"role": "user", "content": user_input}
         )
-        st.session_state["agent_state"] = agent.invoke(
-            st.session_state["agent_state"],
-            {"configurable": {"thread_id": "main"}}
+        
+        # ⭐ 第1步：工具优先（完全独立，不走Agent）
+        from tools import try_handle_with_tool
+        tool_result = try_handle_with_tool(
+            user_input,
+            st.session_state["agent_state"].get("core", {}),
+            st.session_state.get("user_key", "")
         )
+        
+        if tool_result:
+            st.session_state["agent_state"]["messages"].append({
+                "role": "assistant",
+                "content": tool_result
+            })
+        
+        # ⭐ 第2步：首次分析
+        elif not st.session_state["agent_has_analyzed"]:
+            # ⭐ 确保 tender_text 有值
+            if not st.session_state["agent_state"].get("tender_text"):
+                if st.session_state.get("last_full_text"):
+                    st.session_state["agent_state"]["tender_text"] = st.session_state["last_full_text"]
+                else:
+                    st.error("请先上传招标文件")
+                    st.stop()
+
+            result = agent.invoke(
+                st.session_state["agent_state"],
+                {"configurable": {"thread_id": "main"}}
+            )
+            st.session_state["agent_has_analyzed"] = True
+            st.session_state["agent_state"] = result
+        
+        # ⭐ 第3步：追问聊天
+        else:
+            from agent import node_chat
+            result = node_chat(st.session_state["agent_state"])
+            st.session_state["agent_state"] = result
+        
         st.rerun()

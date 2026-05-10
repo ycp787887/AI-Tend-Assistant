@@ -81,7 +81,6 @@ def extract_company_profile_structured(raw_text: str, api_key: str) -> dict[str,
     logger.info(f"公司资质提取完成：注册资本={'有' if result['公司注册资本'] else '无'}，"
                 f"证书数={len(result['持有的证书列表'])}")
     
-    logger.info(f"公司原始文本前500字: {raw_text[:500]}")
     logger.info(f"提取结果: {result}")
 
     return result
