@@ -12,6 +12,8 @@ class TenderInfo(BaseModel):
     注册资本要求: str | None = Field(None, description="对投标人注册资本的要求，如'不低于500万元'")
     必须具备的资质证书: list[str] = Field(default_factory=list, description="投标人必须持有的证书/资质列表，如['ISO 9001', '建筑工程一级']")
     投标截止时间: str | None = Field(None, description="投标截止时间")
+    招标联系人: str | None = Field(None, description="招标公告上的联系人姓名")  # ← 加
+    联系电话: str | None = Field(None, description="招标公告上的联系电话")  # ← 加
 
 
 class CompanyProfile(BaseModel):

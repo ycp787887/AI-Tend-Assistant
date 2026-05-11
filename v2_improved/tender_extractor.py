@@ -64,10 +64,12 @@ def fallback_extract_core_fields(raw_text: str) -> dict[str, Any]:
     certificates = list(dict.fromkeys([c.strip() for c in cert_candidates if c.strip()]))[:5]
 
     result = {
-        "项目名称": project_name,
-        "注册资本要求": capital_requirement,
-        "必须具备的资质证书": certificates,
-        "投标截止时间": bid_deadline,
+    "项目名称": project_name,
+    "注册资本要求": capital_requirement,
+    "必须具备的资质证书": certificates,
+    "投标截止时间": bid_deadline,
+    "招标联系人": None,  # 正则无法提取
+    "联系电话": None,  # 正则无法提取
     }
     
     logger.info(f"兜底提取完成：项目名={'有' if project_name else '无'}，"
@@ -104,13 +106,17 @@ def extract_core_fields_structured(raw_text: str, api_key: str) -> dict[str, Any
     prompt = f"""
 你是招投标信息抽取助手。请从下面原始文本中精准提取以下字段：
 - 项目名称
-- 注册资本要求
-- 必须具备的资质证书（列表）
+- 注册资本要求（需附原文摘录，含章节号）
+- 必须具备的资质证书（列表，需附原文摘录）
 - 投标截止时间
+- 招标联系人
+- 联系电话
 
 要求：
 1) 不确定时返回 null 或空列表，不要臆造。
 2) 资质证书只保留证书/资质名称，不要附带解释。
+3) 资质证书列表中，用"或"连接的视为独立项，分别列出。
+4) "注册资本要求"字段请保留原文完整表述，包括金额、币种和附加条件（如验资报告要求）。
 
 原始文本：
 {relevant_text}
@@ -133,6 +139,8 @@ def extract_core_fields_structured(raw_text: str, api_key: str) -> dict[str, Any
         "注册资本要求": response.注册资本要求,
         "必须具备的资质证书": response.必须具备的资质证书,
         "投标截止时间": response.投标截止时间,
+        "招标联系人": response.招标联系人,
+        "联系电话": response.联系电话,
     }
     
     logger.info(f"结构化提取完成：项目名={'有' if result['项目名称'] else '无'}，"

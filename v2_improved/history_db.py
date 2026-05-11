@@ -98,4 +98,94 @@ def update_latest_risks(risks: list):
         conn.execute("UPDATE history SET results_json = ? WHERE id = ?", 
                      (json.dumps(data, ensure_ascii=False), rec_id))
         conn.commit()
-    conn.close()    
+    conn.close()
+    
+def save_reflection_report(tender_name: str, company_name: str, report: str):
+    """保存反思报告到历史记录"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reflections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            tender_name TEXT,
+            company_name TEXT,
+            report TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO reflections (created_at, tender_name, company_name, report) VALUES (?, ?, ?, ?)",
+        (datetime.now().strftime("%Y-%m-%d %H:%M"), tender_name, company_name, report)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_reflection_reports():
+    """获取所有反思报告"""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, created_at, tender_name, company_name FROM reflections ORDER BY id DESC LIMIT 20"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_reflection_detail(report_id: int):
+    """获取某条反思报告详情"""
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT report FROM reflections WHERE id = ?", (report_id,)).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def delete_reflection_report(report_id: int):
+    """删除某条反思报告"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM reflections WHERE id = ?", (report_id,))
+    conn.commit()
+    conn.close()
+    
+def save_conversation(tender_name: str, messages: list):
+    """保存一次完整对话"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            tender_name TEXT,
+            messages_json TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO conversations (created_at, tender_name, messages_json) VALUES (?, ?, ?)",
+        (datetime.now().strftime("%Y-%m-%d %H:%M"), tender_name or "未命名", json.dumps(messages, ensure_ascii=False))
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_conversations():
+    """获取所有对话列表"""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, created_at, tender_name FROM conversations ORDER BY id DESC LIMIT 30"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def get_conversation(conv_id: int):
+    """获取某条对话的完整消息"""
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT messages_json FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+    conn.close()
+    return json.loads(row[0]) if row else []
+
+
+def delete_conversation(conv_id: int):
+    """删除某条对话"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+    conn.commit()
+    conn.close()
+    
+                

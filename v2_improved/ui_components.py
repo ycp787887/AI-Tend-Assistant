@@ -23,7 +23,7 @@ def _get_current_company_data():
         }
     
     # 获取当前选中的公司名
-    selected = st.session_state.get("selected_company", all_results[0]["name"])
+    selected = st.session_state.get("print_company", "") or st.session_state.get("selected_company", "")
     for r in all_results:
         if r["name"] == selected:
             return {
@@ -189,3 +189,62 @@ def show_print_report():
     """
     
     components.html(print_html, height=800, scrolling=True)
+    
+    
+def print_reflection_report(tender_name: str, company_name: str, report: str):
+    import streamlit.components.v1 as components
+    from html import escape
+    import re
+    
+    # 转换 markdown
+    lines = report.split("\n")
+    body_html = ""
+    for line in lines:
+        line = line.strip()
+        if not line:
+            body_html += "<br>"
+        elif line.startswith("### "):
+            body_html += f"<h3>{escape(line[4:])}</h3>"
+        elif line.startswith("## "):
+            body_html += f"<h2>{escape(line[3:])}</h2>"
+        elif line.startswith("- "):
+            body_html += f"• {escape(line[2:])}<br>"
+        elif "**" in line:
+            line = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
+            body_html += f"{line}<br>"
+        else:
+            body_html += f"{escape(line)}<br>"
+    
+    print_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>废标归档报告 - {escape(company_name)}</title>
+        <style>
+            body {{
+                font-family: 'Microsoft YaHei', Arial, sans-serif;
+                padding: 40px;
+                max-width: 800px;
+                margin: 0 auto;
+                color: #222;
+                line-height: 2;
+                font-size: 15px;
+            }}
+            h2 {{ color: #2c3e50; margin-top: 28px; font-size: 18px; }}
+            h3 {{ color: #34495e; margin-top: 20px; font-size: 16px; }}
+            b {{ color: #c0392b; }}
+            .btn {{ background: #e74c3c; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; }}
+            @media print {{ .no-print {{ display: none !important; }} body {{ font-size: 13px; padding: 20px; }} }}
+        </style>
+    </head>
+    <body>
+        <div class="no-print" style="margin-bottom:25px;">
+            <button class="btn" onclick="window.print()">🖨️ 立即打印</button>
+        </div>
+        {body_html}
+    </body>
+    </html>
+    """
+    
+    components.html(print_html, height=700, scrolling=True)
