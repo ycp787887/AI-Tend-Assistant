@@ -9,3 +9,7 @@ chromadb
 langchain-text-splitters
 instructor
 langgraph
+pikepdf
+pytesseract
+pdf2image
+Pillow

@@ -64,12 +64,13 @@ def init_session_state():
         "last_advice": None,
         "hidden_risks": None,
         "analysis_ready": False,
+        "bidding_stage": "📄 我已经有标书文件了，需要分析",
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
 def clear_cached_analysis():
-    """清空缓存（上传新文件时调用）"""
+    """清空缓存（上传新文件时调用），保留阶段选择和已完成的分析结果"""
     st.session_state["last_full_text"] = None
     st.session_state["company_full_text"] = None
     st.session_state["last_core"] = None
@@ -79,3 +80,6 @@ def clear_cached_analysis():
     st.session_state["last_advice"] = None
     st.session_state["hidden_risks"] = None
     st.session_state["analysis_ready"] = False
+    st.session_state["_file_unlocked"] = False
+    # 注意：不重置 bidding_stage、all_results、company_files
+    

@@ -129,7 +129,7 @@ def node_reflect(state: AgentState) -> AgentState:
 
 
 def node_chat(state: AgentState) -> AgentState:
-    """回答用户问题——纯AI聊天，不处理工具"""
+    """回答用户问题——带上下文记忆"""
     from openai import OpenAI
     from config import DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, LLM_TIMEOUT_SECONDS
     import os
@@ -146,30 +146,27 @@ def node_chat(state: AgentState) -> AgentState:
         ]
         return state
     
-    last_msg = state["messages"][-1]["content"] if state.get("messages") else ""
+    # 构建完整的消息历史
+    messages_for_api = [
+        {"role": "system", "content": "你是招投标分析助手。基于已有的分析数据和对话历史回答用户问题。回答简洁、直接，用中文。如果用户之前提到过文件格式问题，现在又提到了平台名称，主动询问是否需要该平台的操作指引。"}
+    ]
     
-    if not state.get("analysis_done"):
-        state["messages"] = state.get("messages", []) + [
-            {"role": "assistant", "content": "请先上传文件并开始分析。"}
-        ]
-        return state
+    # 加入分析上下文
+    if state.get("analysis_done"):
+        context = "【本次分析结果】\n"
+        context += f"标书要求：{state.get('core', {})}\n"
+        for r in state.get("all_results", []):
+            context += f"公司：{r['name']}，状态：{r.get('status', '未判定')}\n"
+        messages_for_api.append({"role": "system", "content": context})
     
-    context = "以下是一次投标分析的结果：\n\n"
-    context += f"【标书要求】\n{state.get('core', {})}\n\n"
-    
-    if state.get("all_results"):
-        context += "【所有公司分析结果】\n"
-        for r in state["all_results"]:
-            context += f"--- {r['name']} ---\n"
-            context += f"状态：{r.get('status', '未判定')}\n"
-            if r.get("label"):
-                context += f"标签：{r['label']}\n"
-            context += f"公司资质：{r['profile']}\n"
-            context += f"缺失的证书：{r['compare_result'].get('missing_certs', [])}\n"
-            capital_ok = "达标" if not r['compare_result']['capital_not_met'] else "不达标"
-            context += f"注册资本：{capital_ok}\n\n"
-    
-    context += f"\n【用户追问】\n{last_msg}"
+    # 加入历史对话（最近10条，避免过长）
+    history = state.get("messages", [])
+    for msg in history[-10:]:
+        role = msg.get("role", "user")
+        if role == "assistant":
+            messages_for_api.append({"role": "assistant", "content": msg["content"]})
+        else:
+            messages_for_api.append({"role": "user", "content": msg["content"]})
     
     client = OpenAI(
         api_key=api_key,
@@ -182,10 +179,7 @@ def node_chat(state: AgentState) -> AgentState:
         model=DEEPSEEK_MODEL,
         temperature=0.3,
         stream=True,
-        messages=[
-            {"role": "system", "content": "你是招投标分析助手，基于已有的分析数据回答用户问题。回答简洁、直接，用中文。"},
-            {"role": "user", "content": context},
-        ],
+        messages=messages_for_api,
     )
     
     full_answer = ""
@@ -196,12 +190,6 @@ def node_chat(state: AgentState) -> AgentState:
     state["messages"] = state.get("messages", []) + [
         {"role": "assistant", "content": full_answer}
     ]
-    
-    if state.get("core"):
-        st.session_state["last_core"] = state["core"]
-    if state.get("all_results"):
-        st.session_state["all_results"] = state["all_results"]
-        st.session_state["analysis_ready"] = True
     
     return state
 
