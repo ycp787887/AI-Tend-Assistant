@@ -72,6 +72,27 @@ if "hidden_risks" not in st.session_state:
 st.title("招投标全流程助手")
 
 
+# ==================== 第一层防御：访问暗号（必须最先执行）====================
+# 注意：这个判断要放在最前面，不要放在任何 st.expander 里面
+
+# 放在侧边栏最上方，用户一进来就能看到
+access_code = st.sidebar.text_input("🔒 访问暗号", type="password", 
+                                     placeholder="请输入体验密码", 
+                                     help="请联系开发者获取体验密码")
+
+# 从 secrets.toml 读取预设密码（更安全）
+# 别忘了在 Streamlit Cloud 的 Secrets 里添加这个变量
+CORRECT_CODE = st.secrets.get("ACCESS_CODE", "YueYue666")
+
+if not access_code or access_code != CORRECT_CODE:
+    st.sidebar.warning("⚡ 请输入正确的暗号以解锁 AI 分析功能~")
+    # 还可以在主页显示一些项目介绍，但所有核心功能都被禁用
+    st.info("👋 欢迎体验智能投标助手！\n\n请先在左侧输入正确的访问暗号。")
+    st.stop()  # 关键：停止执行后续所有代码
+# ==================== 防御结束 ====================
+
+
+
 # ========== 侧边栏 ==========
 with st.sidebar:
     # --- 功能按钮 ---
