@@ -13,3 +13,4 @@ pikepdf
 pytesseract
 pdf2image
 Pillow
+xhtml2pdf
