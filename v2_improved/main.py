@@ -227,12 +227,7 @@ with st.expander("AI 配置（DeepSeek API）", expanded=False):
         user_key = ""
         st.session_state["user_key"] = user_key
         st.warning("🔧 降级测试模式：不会调用AI")
-    
-    st.text_input("模型名称", value=DEEPSEEK_MODEL, disabled=True)
-    st.text_input("API Base URL", value=DEEPSEEK_BASE_URL, disabled=True)
-    st.text_input("请求超时(秒)", value=str(LLM_TIMEOUT_SECONDS), disabled=True)
-
-
+        
 # ========== 投标阶段分流 ==========
 st.markdown("**您目前处在哪个阶段：**")
 
