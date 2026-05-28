@@ -1,10 +1,7 @@
 streamlit
-pypdf
-DeepSeek
-openai
-reportlab
-weasyprint
 python-dotenv
+openai
+pypdf
 chromadb
 langchain-text-splitters
 instructor
@@ -13,4 +10,4 @@ pikepdf
 pytesseract
 pdf2image
 Pillow
-pycairo
+weasyprint

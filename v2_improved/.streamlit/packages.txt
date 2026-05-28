@@ -1,2 +1,4 @@
 libcairo2-dev
+libpango-1.0-0
+libpangocairo-1.0-0
 pkg-config
