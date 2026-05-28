@@ -38,7 +38,7 @@ from risk_scanner import scan_hidden_risks_streaming, parse_risk_streaming_resul
 from report_builder import (
     build_advice, build_risk_rows, render_risk_table, render_core_fields_table
 )
-from ui_components import show_print_report
+
 
 def _save_agent_conversation():
     """保存当前 Agent 对话到数据库"""
@@ -227,7 +227,7 @@ with st.expander("AI 配置（DeepSeek API）", expanded=False):
         user_key = ""
         st.session_state["user_key"] = user_key
         st.warning("🔧 降级测试模式：不会调用AI")
-        
+
 # ========== 投标阶段分流 ==========
 st.markdown("**您目前处在哪个阶段：**")
 

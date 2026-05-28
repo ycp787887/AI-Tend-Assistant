@@ -6,7 +6,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from html import escape
 from io import BytesIO
-from xhtml2pdf import pisa
 from report_builder import build_advice
 
 
